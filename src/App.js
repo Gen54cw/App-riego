@@ -14,11 +14,28 @@ export default function AppRiegoAutonomico() {
   const [notificaciones, setNotificaciones] = useState([]);
   const [comandoEjecutando, setComandoEjecutando] = useState(null);
 
+  // Función helper para normalizar la URL/IP
+  const normalizeUrl = useCallback((address) => {
+    if (!address) return '';
+    // Si ya tiene http:// o https://, devolverlo tal cual
+    if (address.startsWith('http://') || address.startsWith('https://')) {
+      return address;
+    }
+    // Si es una URL de ngrok/cloudflare, usar https
+    if (address.includes('.ngrok.io') || address.includes('.ngrok-free.app') || 
+        address.includes('.cloudflared.com') || address.includes('ngrok')) {
+      return `https://${address}`;
+    }
+    // Para IPs locales, usar http
+    return `http://${address}`;
+  }, []);
+
   // Función para obtener datos del NodeMCU
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await fetch(`http://${ipAddress}/api/data`);
+      const baseUrl = normalizeUrl(ipAddress);
+      const response = await fetch(`${baseUrl}/api/data`);
       if (!response.ok) throw new Error('No se pudo conectar al NodeMCU');
       const result = await response.json();
       setData(result);
@@ -29,28 +46,49 @@ export default function AppRiegoAutonomico() {
     } finally {
       setLoading(false);
     }
-  }, [ipAddress]);
+  }, [ipAddress, normalizeUrl]);
 
   // Función para obtener lista de cultivos
   const fetchCultivos = useCallback(async () => {
     try {
-      const response = await fetch(`http://${ipAddress}/api/cultivos`);
+      const baseUrl = normalizeUrl(ipAddress);
+      const response = await fetch(`${baseUrl}/api/cultivos`);
       if (!response.ok) throw new Error('Error al obtener cultivos');
       const result = await response.json();
       setCultivos(result);
     } catch (err) {
       console.error('Error cultivos:', err);
     }
-  }, [ipAddress]);
+  }, [ipAddress, normalizeUrl]);
 
   // Función para cambiar cultivo
   const changeCultivo = async (cultivoId) => {
     try {
-      const response = await fetch(`http://${ipAddress}/api/cultivo?id=${cultivoId}`, {
+      // Deshabilitar auto-refresh temporalmente para evitar que se sobrescriban los valores
+      const wasAutoRefresh = autoRefresh;
+      setAutoRefresh(false);
+      
+      const baseUrl = normalizeUrl(ipAddress);
+      const response = await fetch(`${baseUrl}/api/cultivo?id=${cultivoId}`, {
         method: 'POST',
       });
       if (!response.ok) throw new Error('Error al cambiar cultivo');
+      
+      // Esperar un momento para que el servidor procese el cambio
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Actualizar datos
       await fetchData();
+      
+      // Esperar un poco más y actualizar nuevamente para obtener los valores del nuevo cultivo
+      setTimeout(async () => {
+        await fetchData();
+        // Rehabilitar auto-refresh si estaba activo
+        if (wasAutoRefresh) {
+          setAutoRefresh(true);
+        }
+      }, 1000);
+      
       const cultivo = cultivos.find(c => c.id === cultivoId);
       agregarNotificacion(
         'Cultivo actualizado', 
@@ -59,6 +97,8 @@ export default function AppRiegoAutonomico() {
       );
     } catch (err) {
       agregarNotificacion('Error al cambiar cultivo', 'error', err.message);
+      // Rehabilitar auto-refresh en caso de error
+      setAutoRefresh(true);
     }
   };
 
@@ -90,7 +130,8 @@ export default function AppRiegoAutonomico() {
     agregarNotificacion('Enviando comando...', 'info');
 
     try {
-      const response = await fetch(`http://${ipAddress}/api/command?cmd=${command}`, {
+      const baseUrl = normalizeUrl(ipAddress);
+      const response = await fetch(`${baseUrl}/api/command?cmd=${command}`, {
         method: 'POST',
       });
       
@@ -142,7 +183,7 @@ export default function AppRiegoAutonomico() {
   };
 
   // Componente de Configuración Manual
-  const ConfiguracionManual = ({ data, ipAddress, onConfigChange, agregarNotificacion }) => {
+  const ConfiguracionManual = ({ data, ipAddress, onConfigChange, agregarNotificacion, normalizeUrl }) => {
     const [config, setConfig] = useState({
       umbralHumedadMin: data?.umbralHumedadMin || 60,
       umbralHumedadOptimo: data?.umbralHumedadOptimo || 70,
@@ -154,26 +195,58 @@ export default function AppRiegoAutonomico() {
       tempMinSegura: 0.0
     });
     const [guardando, setGuardando] = useState(false);
+    const [editando, setEditando] = useState(false);
+    const [ultimaActualizacion, setUltimaActualizacion] = useState(Date.now());
+
+    // Rastrear si el usuario está editando activamente
+    const handleInputFocus = () => {
+      setEditando(true);
+    };
+
+    const handleInputBlur = () => {
+      // Esperar un momento antes de permitir actualizaciones automáticas
+      setTimeout(() => {
+        setEditando(false);
+      }, 500);
+    };
 
     useEffect(() => {
-      if (data && !guardando) {
-        // Solo actualizar si no estamos en proceso de guardado
-        // Esto evita que se sobrescriban los valores mientras el usuario está editando
-        setConfig(prevConfig => ({
-          umbralHumedadMin: data.umbralHumedadMin ?? prevConfig.umbralHumedadMin ?? 60,
-          umbralHumedadOptimo: data.umbralHumedadOptimo ?? prevConfig.umbralHumedadOptimo ?? 70,
-          umbralHumedadMax: data.umbralHumedadMax ?? prevConfig.umbralHumedadMax ?? 85,
-          tiempoRiego: data.tiempoRiegoActual ?? prevConfig.tiempoRiego ?? 30,
-          tiempoMaxRiego: data.tiempoMaxRiego ?? prevConfig.tiempoMaxRiego ?? 300,
-          tiempoMinEntreRiegos: data.tiempoMinimoEntreRiegos ?? prevConfig.tiempoMinEntreRiegos ?? 60,
-          tempMaxSegura: prevConfig.tempMaxSegura ?? 45.0,
-          tempMinSegura: prevConfig.tempMinSegura ?? 0.0
-        }));
+      if (data && !guardando && !editando) {
+        // Solo actualizar si no estamos guardando, editando, y han pasado al menos 2 segundos desde la última actualización
+        const ahora = Date.now();
+        if (ahora - ultimaActualizacion > 2000) {
+          setConfig(prevConfig => {
+            // Verificar si realmente hay cambios antes de actualizar
+            const hayCambios = 
+              (data.umbralHumedadMin !== undefined && data.umbralHumedadMin !== prevConfig.umbralHumedadMin) ||
+              (data.umbralHumedadOptimo !== undefined && data.umbralHumedadOptimo !== prevConfig.umbralHumedadOptimo) ||
+              (data.umbralHumedadMax !== undefined && data.umbralHumedadMax !== prevConfig.umbralHumedadMax) ||
+              (data.tiempoRiegoActual !== undefined && data.tiempoRiegoActual !== prevConfig.tiempoRiego) ||
+              (data.tiempoMaxRiego !== undefined && data.tiempoMaxRiego !== prevConfig.tiempoMaxRiego) ||
+              (data.tiempoMinimoEntreRiegos !== undefined && data.tiempoMinimoEntreRiegos !== prevConfig.tiempoMinEntreRiegos);
+            
+            if (hayCambios) {
+              setUltimaActualizacion(ahora);
+              return {
+                umbralHumedadMin: data.umbralHumedadMin ?? prevConfig.umbralHumedadMin ?? 60,
+                umbralHumedadOptimo: data.umbralHumedadOptimo ?? prevConfig.umbralHumedadOptimo ?? 70,
+                umbralHumedadMax: data.umbralHumedadMax ?? prevConfig.umbralHumedadMax ?? 85,
+                tiempoRiego: data.tiempoRiegoActual ?? prevConfig.tiempoRiego ?? 30,
+                tiempoMaxRiego: data.tiempoMaxRiego ?? prevConfig.tiempoMaxRiego ?? 300,
+                tiempoMinEntreRiegos: data.tiempoMinimoEntreRiegos ?? prevConfig.tiempoMinEntreRiegos ?? 60,
+                tempMaxSegura: prevConfig.tempMaxSegura ?? 45.0,
+                tempMinSegura: prevConfig.tempMinSegura ?? 0.0
+              };
+            }
+            return prevConfig;
+          });
+        }
       }
-    }, [data, guardando]);
+    }, [data, guardando, editando, ultimaActualizacion]);
 
     const handleSave = async () => {
       setGuardando(true);
+      setEditando(false); // Ya no estamos editando
       try {
         const params = new URLSearchParams({
           umbralMin: config.umbralHumedadMin.toString(),
@@ -186,7 +259,8 @@ export default function AppRiegoAutonomico() {
           tempMin: config.tempMinSegura.toString()
         });
 
-        const response = await fetch(`http://${ipAddress}/api/config?${params}`, {
+        const baseUrl = normalizeUrl(ipAddress);
+        const response = await fetch(`${baseUrl}/api/config?${params}`, {
           method: 'POST',
         });
 
@@ -198,28 +272,14 @@ export default function AppRiegoAutonomico() {
         const result = await response.json();
         agregarNotificacion('Configuración guardada', 'success', result.detalles || 'Los parámetros se han actualizado correctamente');
         
+        // Actualizar timestamp para permitir actualizaciones automáticas
+        setUltimaActualizacion(Date.now());
+        
         // Esperar un momento para que el servidor procese el cambio
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, 500));
         
-        // Actualizar los datos y forzar actualización del estado local
+        // Actualizar los datos
         await onConfigChange();
-        
-        // Actualizar el estado local con los valores guardados para reflejarlos inmediatamente
-        // Esto evita que el useEffect los sobrescriba antes de que lleguen los nuevos datos
-        setTimeout(() => {
-          if (data) {
-            setConfig({
-              umbralHumedadMin: data.umbralHumedadMin || config.umbralHumedadMin,
-              umbralHumedadOptimo: data.umbralHumedadOptimo || config.umbralHumedadOptimo,
-              umbralHumedadMax: data.umbralHumedadMax || config.umbralHumedadMax,
-              tiempoRiego: data.tiempoRiegoActual || config.tiempoRiego,
-              tiempoMaxRiego: data.tiempoMaxRiego || config.tiempoMaxRiego,
-              tiempoMinEntreRiegos: data.tiempoMinimoEntreRiegos || config.tiempoMinEntreRiegos,
-              tempMaxSegura: config.tempMaxSegura,
-              tempMinSegura: config.tempMinSegura
-            });
-          }
-        }, 500);
         
       } catch (err) {
         agregarNotificacion('Error al guardar', 'error', err.message);
@@ -240,7 +300,12 @@ export default function AppRiegoAutonomico() {
               min="0"
               max="100"
               value={config.umbralHumedadMin}
-              onChange={(e) => setConfig({...config, umbralHumedadMin: parseInt(e.target.value) || 0})}
+              onChange={(e) => {
+                setEditando(true);
+                setConfig({...config, umbralHumedadMin: parseInt(e.target.value) || 0});
+              }}
+              onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
               className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
             />
           </div>
@@ -254,7 +319,12 @@ export default function AppRiegoAutonomico() {
               min="0"
               max="100"
               value={config.umbralHumedadOptimo}
-              onChange={(e) => setConfig({...config, umbralHumedadOptimo: parseInt(e.target.value) || 0})}
+              onChange={(e) => {
+                setEditando(true);
+                setConfig({...config, umbralHumedadOptimo: parseInt(e.target.value) || 0});
+              }}
+              onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
               className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
             />
           </div>
@@ -268,7 +338,12 @@ export default function AppRiegoAutonomico() {
               min="0"
               max="100"
               value={config.umbralHumedadMax}
-              onChange={(e) => setConfig({...config, umbralHumedadMax: parseInt(e.target.value) || 0})}
+              onChange={(e) => {
+                setEditando(true);
+                setConfig({...config, umbralHumedadMax: parseInt(e.target.value) || 0});
+              }}
+              onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
               className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
             />
           </div>
@@ -282,7 +357,12 @@ export default function AppRiegoAutonomico() {
               min="10"
               max="600"
               value={config.tiempoRiego}
-              onChange={(e) => setConfig({...config, tiempoRiego: parseInt(e.target.value) || 30})}
+              onChange={(e) => {
+                setEditando(true);
+                setConfig({...config, tiempoRiego: parseInt(e.target.value) || 30});
+              }}
+              onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
               className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
             />
           </div>
@@ -296,7 +376,12 @@ export default function AppRiegoAutonomico() {
               min="60"
               max="1800"
               value={config.tiempoMaxRiego}
-              onChange={(e) => setConfig({...config, tiempoMaxRiego: parseInt(e.target.value) || 300})}
+              onChange={(e) => {
+                setEditando(true);
+                setConfig({...config, tiempoMaxRiego: parseInt(e.target.value) || 300});
+              }}
+              onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
               className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
             />
           </div>
@@ -310,7 +395,12 @@ export default function AppRiegoAutonomico() {
               min="30"
               max="600"
               value={config.tiempoMinEntreRiegos}
-              onChange={(e) => setConfig({...config, tiempoMinEntreRiegos: parseInt(e.target.value) || 60})}
+              onChange={(e) => {
+                setEditando(true);
+                setConfig({...config, tiempoMinEntreRiegos: parseInt(e.target.value) || 60});
+              }}
+              onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
               className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
             />
           </div>
@@ -381,15 +471,18 @@ export default function AppRiegoAutonomico() {
           {showConfig && (
             <div className="bg-blue-50 rounded-xl p-4 mb-4">
               <label className="block text-sm font-semibold text-gray-700 mb-2">
-                IP del NodeMCU
+                IP o URL del NodeMCU
               </label>
               <input
                 type="text"
                 value={ipAddress}
                 onChange={(e) => setIpAddress(e.target.value)}
                 className="w-full px-4 py-2 border-2 border-blue-300 rounded-lg focus:outline-none focus:border-blue-500"
-                placeholder="192.168.1.100"
+                placeholder="192.168.1.100 o https://abc123.ngrok-free.app"
               />
+              <p className="text-xs text-gray-600 mt-2">
+                💡 Para acceso remoto desde Replit, usa una URL de ngrok o Cloudflare Tunnel
+              </p>
               <div className="mt-3 flex items-center justify-between">
                 <label className="text-sm font-medium text-gray-700">
                   Actualización automática
@@ -682,6 +775,7 @@ export default function AppRiegoAutonomico() {
                   setTimeout(() => fetchData(), 500);
                 }}
                 agregarNotificacion={agregarNotificacion}
+                normalizeUrl={normalizeUrl}
               />
             </div>
 

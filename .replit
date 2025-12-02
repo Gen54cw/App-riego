@@ -1,0 +1,21 @@
+language = "nodejs"
+run = "npm start"
+
+[nix]
+channel = "stable-22_11"
+
+[deploy]
+run = ["sh", "-c", "npm run build"]
+
+[env]
+PORT = "3000"
+HOST = "0.0.0.0"
+
+[packager]
+language = "nodejs"
+
+[packager.features]
+packageSearch = true
+guessImports = true
+enabledForHosting = false
+
