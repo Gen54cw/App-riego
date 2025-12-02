@@ -3,7 +3,7 @@ import { RefreshCw, Droplet, Thermometer, Wind, Sprout, Activity, Settings, Aler
 
 export default function AppRiegoAutonomico() {
   // Estado de la app
-  const [ipAddress, setIpAddress] = useState('192.168.18.50');
+  const [ipAddress, setIpAddress] = useState('192.168.43.246');
   const [data, setData] = useState(null);
   const [cultivos, setCultivos] = useState([]);
   const [loading, setLoading] = useState(false);
