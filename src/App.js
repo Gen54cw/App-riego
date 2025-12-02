@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { RefreshCw, Droplet, Thermometer, Wind, Sprout, Activity, Settings, AlertTriangle, Play, Square, BarChart3, Save } from 'lucide-react';
 
 export default function AppRiegoAutonomico() {
@@ -265,49 +265,83 @@ export default function AppRiegoAutonomico() {
     const [ultimaActualizacion, setUltimaActualizacion] = useState(Date.now());
     const [valoresModificados, setValoresModificados] = useState(false);
     const [tiempoUltimaEdicion, setTiempoUltimaEdicion] = useState(null);
+    const [inputConFocus, setInputConFocus] = useState(false);
+    const timeoutRef = useRef(null);
 
     // Rastrear si el usuario está editando activamente
     const handleInputFocus = () => {
       setEditando(true);
       setValoresModificados(true);
+      setInputConFocus(true);
+      setTiempoUltimaEdicion(Date.now());
+      // Limpiar cualquier timeout pendiente
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
     };
 
     const handleInputBlur = () => {
+      setInputConFocus(false);
       setTiempoUltimaEdicion(Date.now());
-      // Esperar más tiempo antes de permitir actualizaciones automáticas (3 segundos)
-      setTimeout(() => {
+      // Esperar 10 segundos antes de permitir actualizaciones automáticas
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      timeoutRef.current = setTimeout(() => {
         setEditando(false);
-        // Solo permitir actualizaciones después de 5 segundos sin editar
+        // Esperar otros 5 segundos antes de permitir actualizaciones
         setTimeout(() => {
           setValoresModificados(false);
-        }, 2000);
-      }, 3000);
+        }, 5000);
+      }, 10000);
     };
 
     const handleInputChange = () => {
       setEditando(true);
       setValoresModificados(true);
       setTiempoUltimaEdicion(Date.now());
+      // Limpiar y reiniciar el timeout cada vez que el usuario escribe
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
     };
 
+    // Limpiar timeout al desmontar
     useEffect(() => {
-      if (data && !guardando && !editando && !valoresModificados) {
-        // Solo actualizar si no estamos guardando, editando, no hay valores modificados,
-        // y han pasado al menos 5 segundos desde la última actualización
+      return () => {
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+        }
+      };
+    }, []);
+
+    useEffect(() => {
+      // NO actualizar si:
+      // - Estamos guardando
+      // - El usuario está editando
+      // - Hay valores modificados
+      // - Un input tiene focus
+      // - Han pasado menos de 15 segundos desde la última edición
+      if (guardando || editando || valoresModificados || inputConFocus) {
+        return; // NO hacer nada si el usuario está interactuando
+      }
+
+      if (data) {
         const ahora = Date.now();
         const tiempoDesdeUltimaEdicion = tiempoUltimaEdicion ? ahora - tiempoUltimaEdicion : Infinity;
         
-        // Solo actualizar si han pasado al menos 5 segundos desde la última edición
-        if (tiempoDesdeUltimaEdicion > 5000 && ahora - ultimaActualizacion > 5000) {
+        // Solo actualizar si han pasado al menos 15 segundos desde la última edición
+        // y al menos 10 segundos desde la última actualización
+        if (tiempoDesdeUltimaEdicion > 15000 && ahora - ultimaActualizacion > 10000) {
           setConfig(prevConfig => {
-            // Verificar si realmente hay cambios antes de actualizar
+            // Verificar si realmente hay cambios significativos antes de actualizar
             const hayCambios = 
-              (data.umbralHumedadMin !== undefined && data.umbralHumedadMin !== prevConfig.umbralHumedadMin) ||
-              (data.umbralHumedadOptimo !== undefined && data.umbralHumedadOptimo !== prevConfig.umbralHumedadOptimo) ||
-              (data.umbralHumedadMax !== undefined && data.umbralHumedadMax !== prevConfig.umbralHumedadMax) ||
-              (data.tiempoRiegoActual !== undefined && data.tiempoRiegoActual !== prevConfig.tiempoRiego) ||
-              (data.tiempoMaxRiego !== undefined && data.tiempoMaxRiego !== prevConfig.tiempoMaxRiego) ||
-              (data.tiempoMinimoEntreRiegos !== undefined && data.tiempoMinimoEntreRiegos !== prevConfig.tiempoMinEntreRiegos);
+              (data.umbralHumedadMin !== undefined && Math.abs(data.umbralHumedadMin - prevConfig.umbralHumedadMin) > 0) ||
+              (data.umbralHumedadOptimo !== undefined && Math.abs(data.umbralHumedadOptimo - prevConfig.umbralHumedadOptimo) > 0) ||
+              (data.umbralHumedadMax !== undefined && Math.abs(data.umbralHumedadMax - prevConfig.umbralHumedadMax) > 0) ||
+              (data.tiempoRiegoActual !== undefined && Math.abs(data.tiempoRiegoActual - prevConfig.tiempoRiego) > 0) ||
+              (data.tiempoMaxRiego !== undefined && Math.abs(data.tiempoMaxRiego - prevConfig.tiempoMaxRiego) > 0) ||
+              (data.tiempoMinimoEntreRiegos !== undefined && Math.abs(data.tiempoMinimoEntreRiegos - prevConfig.tiempoMinEntreRiegos) > 0);
             
             if (hayCambios) {
               setUltimaActualizacion(ahora);
@@ -326,7 +360,7 @@ export default function AppRiegoAutonomico() {
           });
         }
       }
-    }, [data, guardando, editando, valoresModificados, ultimaActualizacion, tiempoUltimaEdicion]);
+    }, [data, guardando, editando, valoresModificados, inputConFocus, ultimaActualizacion, tiempoUltimaEdicion]);
 
     const handleSave = async () => {
       setGuardando(true);
