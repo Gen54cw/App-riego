@@ -13,6 +13,42 @@ export default function AppRiegoAutonomico() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [notificaciones, setNotificaciones] = useState([]);
   const [comandoEjecutando, setComandoEjecutando] = useState(null);
+  const [ultimoRiegoTimestamp, setUltimoRiegoTimestamp] = useState(null);
+  const [tiempoRestanteDisplay, setTiempoRestanteDisplay] = useState(0);
+
+  // Rastrear cuando el riego termina para actualizar el timestamp
+  const [bombaActivaAnterior, setBombaActivaAnterior] = useState(null);
+  
+  useEffect(() => {
+    if (data) {
+      // Detectar transición de activo a inactivo (el riego acaba de terminar)
+      if (bombaActivaAnterior === true && !data.bombaActiva) {
+        // El riego acaba de terminar, actualizar el timestamp
+        setUltimoRiegoTimestamp(Date.now());
+      }
+      // Actualizar el estado anterior
+      setBombaActivaAnterior(data.bombaActiva);
+    }
+  }, [data?.bombaActiva, bombaActivaAnterior]);
+
+  // Actualizar tiempo restante cada segundo para mostrarlo en el botón
+  useEffect(() => {
+    if (ultimoRiegoTimestamp && data?.tiempoMinimoEntreRiegos && !data?.bombaActiva) {
+      const interval = setInterval(() => {
+        const tiempoTranscurrido = Math.floor((Date.now() - ultimoRiegoTimestamp) / 1000);
+        const tiempoRestante = Math.max(0, data.tiempoMinimoEntreRiegos - tiempoTranscurrido);
+        setTiempoRestanteDisplay(tiempoRestante);
+        
+        if (tiempoRestante === 0) {
+          clearInterval(interval);
+        }
+      }, 1000);
+      
+      return () => clearInterval(interval);
+    } else {
+      setTiempoRestanteDisplay(0);
+    }
+  }, [ultimoRiegoTimestamp, data?.tiempoMinimoEntreRiegos, data?.bombaActiva]);
 
   // Función helper para normalizar la URL/IP
   const normalizeUrl = useCallback((address) => {
@@ -126,6 +162,28 @@ export default function AppRiegoAutonomico() {
       return;
     }
 
+    // Verificar tiempo mínimo entre riegos si el comando es 'regar'
+    if (command === 'regar' && data?.tiempoMinimoEntreRiegos) {
+      const tiempoMinimo = data.tiempoMinimoEntreRiegos;
+      
+      // SIEMPRE verificar si hay un timestamp guardado
+      if (ultimoRiegoTimestamp) {
+        const tiempoTranscurrido = Math.floor((Date.now() - ultimoRiegoTimestamp) / 1000);
+        
+        if (tiempoTranscurrido < tiempoMinimo) {
+          const tiempoRestante = tiempoMinimo - tiempoTranscurrido;
+          agregarNotificacion(
+            'Tiempo mínimo entre riegos',
+            'warning',
+            `Debes esperar ${tiempoRestante} segundos más antes de iniciar otro riego. El tiempo mínimo configurado es ${tiempoMinimo} segundos.`
+          );
+          return; // BLOQUEAR la ejecución - no permitir el riego
+        }
+      }
+      // Si no hay timestamp, es la primera vez o se perdió el estado
+      // En este caso, permitir el riego pero establecer el timestamp para el próximo
+    }
+
     setComandoEjecutando(command);
     agregarNotificacion('Enviando comando...', 'info');
 
@@ -143,6 +201,14 @@ export default function AppRiegoAutonomico() {
       
       if (result.status === 'ok') {
         agregarNotificacion(result.message, 'success', result.detalles || '');
+        
+        // Guardar timestamp del último riego si el comando fue 'regar' o 'detener'
+        if (command === 'regar') {
+          setUltimoRiegoTimestamp(Date.now());
+        } else if (command === 'detener') {
+          // También actualizar cuando se detiene, para que el próximo riego respete el tiempo mínimo
+          setUltimoRiegoTimestamp(Date.now());
+        }
       } else {
         agregarNotificacion(result.message, 'warning', result.detalles || '');
       }
@@ -197,24 +263,42 @@ export default function AppRiegoAutonomico() {
     const [guardando, setGuardando] = useState(false);
     const [editando, setEditando] = useState(false);
     const [ultimaActualizacion, setUltimaActualizacion] = useState(Date.now());
+    const [valoresModificados, setValoresModificados] = useState(false);
+    const [tiempoUltimaEdicion, setTiempoUltimaEdicion] = useState(null);
 
     // Rastrear si el usuario está editando activamente
     const handleInputFocus = () => {
       setEditando(true);
+      setValoresModificados(true);
     };
 
     const handleInputBlur = () => {
-      // Esperar un momento antes de permitir actualizaciones automáticas
+      setTiempoUltimaEdicion(Date.now());
+      // Esperar más tiempo antes de permitir actualizaciones automáticas (3 segundos)
       setTimeout(() => {
         setEditando(false);
-      }, 500);
+        // Solo permitir actualizaciones después de 5 segundos sin editar
+        setTimeout(() => {
+          setValoresModificados(false);
+        }, 2000);
+      }, 3000);
+    };
+
+    const handleInputChange = () => {
+      setEditando(true);
+      setValoresModificados(true);
+      setTiempoUltimaEdicion(Date.now());
     };
 
     useEffect(() => {
-      if (data && !guardando && !editando) {
-        // Solo actualizar si no estamos guardando, editando, y han pasado al menos 2 segundos desde la última actualización
+      if (data && !guardando && !editando && !valoresModificados) {
+        // Solo actualizar si no estamos guardando, editando, no hay valores modificados,
+        // y han pasado al menos 5 segundos desde la última actualización
         const ahora = Date.now();
-        if (ahora - ultimaActualizacion > 2000) {
+        const tiempoDesdeUltimaEdicion = tiempoUltimaEdicion ? ahora - tiempoUltimaEdicion : Infinity;
+        
+        // Solo actualizar si han pasado al menos 5 segundos desde la última edición
+        if (tiempoDesdeUltimaEdicion > 5000 && ahora - ultimaActualizacion > 5000) {
           setConfig(prevConfig => {
             // Verificar si realmente hay cambios antes de actualizar
             const hayCambios = 
@@ -242,11 +326,13 @@ export default function AppRiegoAutonomico() {
           });
         }
       }
-    }, [data, guardando, editando, ultimaActualizacion]);
+    }, [data, guardando, editando, valoresModificados, ultimaActualizacion, tiempoUltimaEdicion]);
 
     const handleSave = async () => {
       setGuardando(true);
-      setEditando(false); // Ya no estamos editando
+      setEditando(false);
+      setValoresModificados(false);
+      setTiempoUltimaEdicion(null);
       try {
         const params = new URLSearchParams({
           umbralMin: config.umbralHumedadMin.toString(),
@@ -301,7 +387,7 @@ export default function AppRiegoAutonomico() {
               max="100"
               value={config.umbralHumedadMin}
               onChange={(e) => {
-                setEditando(true);
+                handleInputChange();
                 setConfig({...config, umbralHumedadMin: parseInt(e.target.value) || 0});
               }}
               onFocus={handleInputFocus}
@@ -320,7 +406,7 @@ export default function AppRiegoAutonomico() {
               max="100"
               value={config.umbralHumedadOptimo}
               onChange={(e) => {
-                setEditando(true);
+                handleInputChange();
                 setConfig({...config, umbralHumedadOptimo: parseInt(e.target.value) || 0});
               }}
               onFocus={handleInputFocus}
@@ -339,7 +425,7 @@ export default function AppRiegoAutonomico() {
               max="100"
               value={config.umbralHumedadMax}
               onChange={(e) => {
-                setEditando(true);
+                handleInputChange();
                 setConfig({...config, umbralHumedadMax: parseInt(e.target.value) || 0});
               }}
               onFocus={handleInputFocus}
@@ -358,7 +444,7 @@ export default function AppRiegoAutonomico() {
               max="600"
               value={config.tiempoRiego}
               onChange={(e) => {
-                setEditando(true);
+                handleInputChange();
                 setConfig({...config, tiempoRiego: parseInt(e.target.value) || 30});
               }}
               onFocus={handleInputFocus}
@@ -377,7 +463,7 @@ export default function AppRiegoAutonomico() {
               max="1800"
               value={config.tiempoMaxRiego}
               onChange={(e) => {
-                setEditando(true);
+                handleInputChange();
                 setConfig({...config, tiempoMaxRiego: parseInt(e.target.value) || 300});
               }}
               onFocus={handleInputFocus}
@@ -396,7 +482,7 @@ export default function AppRiegoAutonomico() {
               max="600"
               value={config.tiempoMinEntreRiegos}
               onChange={(e) => {
-                setEditando(true);
+                handleInputChange();
                 setConfig({...config, tiempoMinEntreRiegos: parseInt(e.target.value) || 60});
               }}
               onFocus={handleInputFocus}
@@ -481,7 +567,7 @@ export default function AppRiegoAutonomico() {
                 placeholder="192.168.1.100 o https://abc123.ngrok-free.app"
               />
               <p className="text-xs text-gray-600 mt-2">
-                💡 Para acceso remoto desde Replit, usa una URL de ngrok o Cloudflare Tunnel
+                💡 Si estás en la misma WiFi: usa la IP local (ej: 192.168.1.100). Para acceso remoto: usa ngrok o Cloudflare Tunnel
               </p>
               <div className="mt-3 flex items-center justify-between">
                 <label className="text-sm font-medium text-gray-700">
@@ -784,20 +870,32 @@ export default function AppRiegoAutonomico() {
               <h3 className="text-lg font-bold text-gray-800 mb-4">🎮 Control Manual</h3>
               
               <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => sendCommand('regar')}
-                  disabled={comandoEjecutando || data?.bombaActiva || data?.emergenciaActiva}
-                  className={`flex items-center justify-center gap-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white py-4 rounded-xl font-semibold hover:shadow-lg transition ${
-                    comandoEjecutando || data?.bombaActiva || data?.emergenciaActiva ? 'opacity-50 cursor-not-allowed' : ''
-                  }`}
-                >
-                  {comandoEjecutando === 'regar' ? (
-                    <RefreshCw size={20} className="animate-spin" />
-                  ) : (
-                    <Play size={20} />
-                  )}
-                  {data?.bombaActiva ? 'Riego Activo' : 'Iniciar'}
-                </button>
+                {(() => {
+                  const tiempoRestante = tiempoRestanteDisplay;
+                  const puedeIniciar = !comandoEjecutando && !data?.bombaActiva && !data?.emergenciaActiva && tiempoRestante === 0;
+                  
+                  return (
+                    <button
+                      onClick={() => sendCommand('regar')}
+                      disabled={!puedeIniciar}
+                      className={`flex items-center justify-center gap-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white py-4 rounded-xl font-semibold hover:shadow-lg transition ${
+                        !puedeIniciar ? 'opacity-50 cursor-not-allowed' : ''
+                      }`}
+                      title={tiempoRestante > 0 ? `Espera ${tiempoRestante}s más` : ''}
+                    >
+                      {comandoEjecutando === 'regar' ? (
+                        <RefreshCw size={20} className="animate-spin" />
+                      ) : (
+                        <Play size={20} />
+                      )}
+                      {data?.bombaActiva 
+                        ? 'Riego Activo' 
+                        : tiempoRestante > 0 
+                          ? `Espera ${tiempoRestante}s` 
+                          : 'Iniciar'}
+                    </button>
+                  );
+                })()}
                 
                 <button
                   onClick={() => sendCommand('detener')}

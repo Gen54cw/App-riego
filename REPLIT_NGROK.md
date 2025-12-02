@@ -8,29 +8,79 @@ Esta guía te ayudará a ejecutar tu app de Riego Inteligente en Replit y conect
 - **Tu Celular y Arduino**: Comparten la misma red WiFi
 - **Solución**: Usar Replit para la app + ngrok para exponer el Arduino
 
-## 🔧 Paso 1: Configurar ngrok en tu Celular/PC (misma red que Arduino)
+## 🔧 Paso 1: Configurar ngrok (misma red que Arduino)
 
-### Opción A: Instalar ngrok en tu Celular (Android)
+### ⭐ Opción RECOMENDADA: Usar una App Simple (Serveo o LocalTunnel)
 
-1. **Descarga ngrok** desde [ngrok.com/download](https://ngrok.com/download) o desde Google Play Store
-2. **Crea una cuenta gratuita** en [ngrok.com](https://ngrok.com) (gratis)
-3. **Obtén tu token de autenticación** desde el dashboard de ngrok
-4. **Configura ngrok**:
+**Opción más fácil - No requiere instalación complicada:**
+
+#### Método 1: Usar Serveo (Sin instalación)
+1. **Abre tu navegador** en tu celular (misma WiFi que Arduino)
+2. **Ve a**: `https://serveo.net`
+3. **En la terminal web**, ejecuta:
    ```bash
-   ngrok authtoken TU_TOKEN_AQUI
-   ngrok http 80
+   ssh -R 80:192.168.1.50:80 serveo.net
    ```
-   (Ajusta el puerto si tu Arduino usa otro, normalmente 80)
+   (Reemplaza `192.168.1.50` con la IP de tu Arduino)
+4. **Copia la URL** que aparece (ej: `https://abc123.serveo.net`)
+5. **Úsala en la app de Replit**
 
-5. **Copia la URL HTTPS** que aparece (ej: `https://abc123.ngrok-free.app`)
+#### Método 2: Usar LocalTunnel (Requiere Node.js)
+Si tienes Node.js instalado en algún dispositivo:
+```bash
+npm install -g localtunnel
+lt --port 80 --subdomain mi-riego
+```
+(Te dará una URL como: `https://mi-riego.loca.lt`)
+
+### Opción A: Instalar ngrok en Android (Requiere Termux)
+
+**⚠️ Más complejo, pero funciona bien:**
+
+1. **Instala Termux** desde [Google Play Store](https://play.google.com/store/apps/details?id=com.termux)
+2. **Abre Termux** y ejecuta:
+   ```bash
+   pkg update && pkg upgrade
+   pkg install wget unzip
+   ```
+3. **Descarga ngrok**:
+   ```bash
+   wget https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-arm64.zip
+   unzip ngrok-v3-stable-linux-arm64.zip
+   chmod +x ngrok
+   ```
+4. **Crea cuenta en [ngrok.com](https://ngrok.com)** (gratis)
+5. **Obtén tu token** del dashboard de ngrok
+6. **Configura el token**:
+   ```bash
+   ./ngrok authtoken TU_TOKEN_AQUI
+   ```
+7. **Ejecuta ngrok**:
+   ```bash
+   ./ngrok http 80
+   ```
+   (Ajusta el puerto si tu Arduino usa otro)
+8. **Copia la URL HTTPS** que aparece (ej: `https://abc123.ngrok-free.app`)
 
 ### Opción B: Instalar ngrok en una PC en la misma red
 
 Si tienes acceso a una PC en la misma red WiFi que el Arduino:
 
 1. **Descarga ngrok** para Windows/Mac/Linux desde [ngrok.com/download](https://ngrok.com/download)
-2. **Sigue los mismos pasos** que en la Opción A
-3. **Mantén ngrok ejecutándose** mientras uses la app
+2. **Extrae el archivo** en una carpeta
+3. **Abre terminal/CMD** en esa carpeta
+4. **Crea cuenta en [ngrok.com](https://ngrok.com)** y obtén tu token
+5. **Configura el token**:
+   ```bash
+   ngrok authtoken TU_TOKEN_AQUI
+   ```
+6. **Ejecuta ngrok**:
+   ```bash
+   ngrok http 80
+   ```
+   (Ajusta el puerto si tu Arduino usa otro)
+7. **Copia la URL HTTPS** que aparece
+8. **Mantén ngrok ejecutándose** mientras uses la app
 
 ## 🌐 Paso 2: Subir tu Proyecto a Replit
 

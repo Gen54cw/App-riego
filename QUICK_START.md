@@ -1,18 +1,28 @@
-# ⚡ Inicio Rápido - Replit + ngrok
+# ⚡ Inicio Rápido - Replit + Túnel
 
 ## 🎯 Configuración en 5 minutos
 
-### 1️⃣ Instalar ngrok en tu Celular (Android)
+### 1️⃣ Exponer tu Arduino (Elige el método más fácil)
 
-```bash
-# Descarga desde ngrok.com o Play Store
-# Crea cuenta gratuita en ngrok.com
-# Obtén tu token
-ngrok authtoken TU_TOKEN
-ngrok http 80
-```
+#### ⭐ Método Más Fácil: Serveo (Sin Instalación)
 
-**Copia la URL** que aparece (ej: `https://abc123.ngrok-free.app`)
+1. **Abre tu navegador** en tu celular (misma WiFi que Arduino)
+2. **Ve a**: https://serveo.net
+3. **Ejecuta** (reemplaza `192.168.1.50` con la IP de tu Arduino):
+   ```bash
+   ssh -R 80:192.168.1.50:80 serveo.net
+   ```
+4. **Copia la URL** que aparece (ej: `https://abc123.serveo.net`)
+
+#### Método Alternativo: ngrok en PC
+
+Si tienes una PC en la misma red:
+1. Descarga ngrok desde [ngrok.com/download](https://ngrok.com/download)
+2. Crea cuenta y obtén tu token
+3. Ejecuta: `ngrok authtoken TU_TOKEN` luego `ngrok http 80`
+4. Copia la URL que aparece
+
+**Ver más opciones en**: `ALTERNATIVAS_NGROK.md`
 
 ### 2️⃣ Subir a Replit
 

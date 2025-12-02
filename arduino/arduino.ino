@@ -7,7 +7,7 @@
 // ============================================
 // CONFIGURACIÓN WiFi y ThingSpeak
 // ============================================
-const char* ssid = "Minini 2.4G";
+const char* ssid = "PRUEBA";
 const char* password = "gaticu54";
 
 // ThingSpeak
