@@ -179,6 +179,26 @@ void aplicarConfiguracionCultivo() {
 // ============================================
 // PRINCIPIO 1: AUTO-CONFIGURACIÓN
 // ============================================
+// 
+// DESCRIPCIÓN EXHAUSTIVA:
+// -----------------------
+// La autoconfiguración permite que el sistema detecte automáticamente las 
+// características del entorno físico (tipo de suelo, condiciones ambientales) 
+// y ajuste sus parámetros operativos sin necesidad de configuración manual previa.
+//
+// PROCESO DE CALIBRACIÓN AUTOMÁTICA:
+// 1. Recopila lecturas continuas del sensor analógico de humedad del suelo
+// 2. Determina los valores extremos (máximo para suelo seco, mínimo para húmedo)
+// 3. Analiza la variabilidad estadística para clasificar el tipo de suelo
+// 4. Ajusta automáticamente los tiempos de riego según el tipo detectado
+// 5. Establece un mapeo preciso entre valores analógicos y porcentajes de humedad
+//
+// IMPORTANCIA:
+// - Adapta el sistema a variaciones de fabricación del sensor
+// - Compensa diferencias entre tipos de suelo
+// - Elimina la necesidad de calibración manual
+// - Garantiza precisión en las mediciones de humedad
+//
 void autoCalibracion() {
   static unsigned long inicioCalibracion = 0;
   static int lecturasCalibracion = 0;
@@ -257,6 +277,28 @@ void autoCalibracion() {
   inicioCalibracion = 0; // Reset para próxima calibración
 }
 
+// ============================================
+// PRINCIPIO 3: AUTO-CURACIÓN - Diagnóstico DHT
+// ============================================
+//
+// DESCRIPCIÓN EXHAUSTIVA:
+// -----------------------
+// La autocuración permite que el sistema detecte fallos en sus componentes,
+// implemente medidas de respaldo y recupere automáticamente la funcionalidad.
+//
+// PROCESO DE DIAGNÓSTICO DEL SENSOR DHT22:
+// 1. Valida que las lecturas no sean NaN (Not a Number)
+// 2. Incrementa contador de fallos en caso de lectura inválida
+// 3. Después de 3 fallos consecutivos, marca el sensor como no operativo
+// 4. Almacena los últimos valores válidos para uso como respaldo
+// 5. Permite que el sistema continúe operando con valores de respaldo
+//
+// IMPORTANCIA:
+// - Garantiza continuidad del servicio ante fallos de sensores
+// - Previene decisiones erróneas basadas en lecturas inválidas
+// - Permite recuperación automática sin intervención manual
+// - Informa al usuario sobre el estado del sistema (modo seguro)
+//
 bool diagnosticarDHT(float temp, float hum) {
   if (isnan(temp) || isnan(hum)) {
     autoReparacion.fallosDHT++;
@@ -273,6 +315,28 @@ bool diagnosticarDHT(float temp, float hum) {
   return true;
 }
 
+// ============================================
+// PRINCIPIO 3: AUTO-CURACIÓN - Recuperación DHT
+// ============================================
+//
+// DESCRIPCIÓN EXHAUSTIVA:
+// -----------------------
+// Sistema de recuperación automática que intenta restaurar la funcionalidad
+// del sensor DHT22 mediante reinicializaciones periódicas.
+//
+// PROCESO DE RECUPERACIÓN:
+// 1. Espera 30 segundos entre intentos para evitar sobrecarga
+// 2. Reinicializa el sensor mediante dht.begin()
+// 3. Incrementa contador de intentos de recuperación
+// 4. Después de 5 intentos fallidos, activa modo seguro permanente
+// 5. Permite que el sistema continúe usando valores de respaldo
+//
+// IMPORTANCIA:
+// - Muchos fallos de sensores son temporales (condensación, conexiones sueltas)
+// - Los intentos automáticos permiten recuperación sin intervención manual
+// - El límite de intentos previene ciclos infinitos de recuperación
+// - El modo seguro garantiza operación estable con valores de respaldo
+//
 void intentarRecuperarDHT() {
   if (millis() - autoReparacion.ultimoIntentoRecuperacion > 30000) {
     dht.begin();
@@ -284,6 +348,32 @@ void intentarRecuperarDHT() {
   }
 }
 
+// ============================================
+// PRINCIPIO 3: AUTO-CURACIÓN - Diagnóstico Flujo
+// ============================================
+//
+// DESCRIPCIÓN EXHAUSTIVA:
+// -----------------------
+// Monitorea continuamente el sensor de flujo para detectar anomalías en el
+// sistema de riego que podrían indicar problemas mecánicos o de instalación.
+//
+// DETECCIONES REALIZADAS:
+// 1. BLOQUEO DE BOMBA: Bomba activa sin flujo de agua (después de 5 segundos)
+//    - Indica posible obstrucción, fallo de bomba o falta de agua
+//    - Permite 5 segundos de margen para el arranque normal de la bomba
+//    - Marca la bomba como bloqueada para prevenir daños
+//
+// 2. FUGA DE AGUA: Flujo detectado cuando la bomba está apagada
+//    - Indica posible fuga en tuberías o conexiones
+//    - Umbral de detección: > 0.5 L/min sin bomba activa
+//    - Activa emergencia para notificar al usuario
+//
+// IMPORTANCIA:
+// - Protección de la bomba contra sobrecalentamiento por bloqueo
+// - Detección temprana de fugas que desperdician agua y aumentan costos
+// - Mantenimiento predictivo: identifica problemas antes de fallos mayores
+// - Prevención de daños costosos en componentes del sistema
+//
 bool diagnosticarFlujo() {
   if (digitalRead(RELE) == HIGH && flujoLitrosPorMinuto < 0.1 && 
       millis() - proteccion.inicioRiego > 5000) {
@@ -297,6 +387,36 @@ bool diagnosticarFlujo() {
   return true;
 }
 
+// ============================================
+// PRINCIPIO 2: AUTO-OPTIMIZACIÓN
+// ============================================
+//
+// DESCRIPCIÓN EXHAUSTIVA:
+// -----------------------
+// La autooptimización permite que el sistema mejore continuamente su rendimiento
+// mediante el análisis de datos históricos y el ajuste dinámico de parámetros
+// operativos para maximizar la eficiencia del uso del agua.
+//
+// PROCESO DE OPTIMIZACIÓN:
+// 1. Cada 10 ciclos de riego, analiza el historial de los últimos 10 ciclos
+// 2. Calcula la eficiencia promedio: (humedadGanada / aguaUsada) * 100
+// 3. Compara la eficiencia actual con la mejor eficiencia registrada
+// 4. Si la eficiencia mejora, actualiza el tiempo óptimo de riego
+// 5. Si la eficiencia disminuye, ajusta gradualmente hacia el tiempo óptimo
+// 6. Utiliza promedio ponderado para evitar cambios bruscos
+//
+// ALGORITMO DE APRENDIZAJE:
+// - Aprende de cada ciclo de riego para mejorar continuamente
+// - Se adapta a cambios estacionales o en condiciones del suelo
+// - Converge gradualmente hacia el tiempo de riego óptimo
+// - Maximiza la eficiencia del agua sin desperdicio
+//
+// IMPORTANCIA:
+// - Reduce el desperdicio de agua ajustando la duración exacta necesaria
+// - Se adapta automáticamente a cambios en las condiciones del entorno
+// - Mejora con el tiempo sin requerir intervención humana
+// - Optimiza el uso de recursos (agua y energía)
+//
 void optimizarParametros() {
   optimizacion.ciclosSinAjuste++;
   if (optimizacion.ciclosRiego > 0 && optimizacion.ciclosRiego % 10 == 0) {
@@ -335,6 +455,48 @@ void registrarCicloRiego(int humedadAntes, int humedadDespues, float aguaUsada) 
   }
 }
 
+// ============================================
+// PRINCIPIO 4: AUTO-PROTECCIÓN - Verificación de Seguridad
+// ============================================
+//
+// DESCRIPCIÓN EXHAUSTIVA:
+// -----------------------
+// La autoprotección permite que el sistema detecte condiciones peligrosas,
+// implemente medidas de seguridad automáticas y se recupere de situaciones
+// de emergencia sin intervención externa.
+//
+// VERIFICACIONES DE SEGURIDAD REALIZADAS:
+// 1. TEMPERATURA MÁXIMA (> 45°C): Bloquea riego por riesgo de daño
+//    - Protege plantas de estrés térmico
+//    - Previene daño a componentes electrónicos
+//    - Activa emergencia por sobrecalentamiento
+//
+// 2. TEMPERATURA MÍNIMA (< 0°C): Bloquea riego por riesgo de congelación
+//    - Previene congelación del agua en tuberías
+//    - Evita daño por expansión del hielo
+//    - Activa emergencia por riesgo de congelación
+//
+// 3. TIEMPO MÁXIMO DE RIEGO (> 5 minutos): Detiene riego automáticamente
+//    - Previene encharcamiento y saturación del suelo
+//    - Reduce desperdicio de agua
+//    - Protege raíces de asfixia por exceso de agua
+//
+// 4. HUMEDAD MÁXIMA DEL SUELO: Bloquea nuevos riegos si está saturado
+//    - Previene sobresaturación que daña raíces
+//    - Evita lixiviación de nutrientes
+//    - Activa emergencia por sobresaturación
+//
+// 5. TIEMPO MÍNIMO ENTRE RIEGOS: Verifica frecuencia adecuada
+//    - Permite que el suelo absorba el agua antes del próximo riego
+//    - Previene riegos consecutivos excesivos
+//    - Protege contra encharcamiento
+//
+// IMPORTANCIA:
+// - Previene daño a plantas por condiciones extremas
+// - Reduce desperdicio de agua y energía
+// - Protege componentes del sistema de daños costosos
+// - Garantiza operación segura sin supervisión constante
+//
 bool verificarCondicionesSeguras(float temp, int humedadSuelo) {
   bool seguro = true;
   if (temp > proteccion.tempMaxSegura) {
@@ -366,6 +528,42 @@ bool verificarCondicionesSeguras(float temp, int humedadSuelo) {
   return seguro;
 }
 
+// ============================================
+// PRINCIPIO 4: AUTO-PROTECCIÓN - Gestión de Emergencias
+// ============================================
+//
+// DESCRIPCIÓN EXHAUSTIVA:
+// -----------------------
+// Sistema de gestión automática de emergencias que detecta condiciones peligrosas,
+// implementa medidas de seguridad inmediatas y se recupera automáticamente.
+//
+// PROCESO DE GESTIÓN DE EMERGENCIAS:
+// 1. DETECCIÓN: Identifica condición peligrosa mediante verificaciones continuas
+// 2. ACCIÓN INMEDIATA: Detiene la bomba de riego instantáneamente
+// 3. CAMBIO DE ESTADO: Cambia a modo EMERGENCIA para bloquear operaciones
+// 4. REGISTRO: Guarda la razón de la emergencia para diagnóstico
+// 5. NOTIFICACIÓN: Informa al usuario mediante API REST
+// 6. RECUPERACIÓN AUTOMÁTICA: Espera 60 segundos y restablece condiciones
+//
+// NIVELES DE EMERGENCIA:
+// - Nivel 0: Normal, sin emergencias
+// - Nivel 1: Advertencia, condiciones subóptimas pero operativas
+// - Nivel 2: Crítica, sistema detenido por seguridad
+//
+// TIPOS DE EMERGENCIAS DETECTADAS:
+// - Sobrecalentamiento (temperatura excesiva)
+// - Riesgo de congelación (temperatura muy baja)
+// - Tiempo máximo de riego excedido
+// - Suelo sobresaturado
+// - Bloqueo de bomba detectado
+// - Fuga de agua detectada
+//
+// IMPORTANCIA:
+// - Respuesta inmediata previene daños antes de que ocurran
+// - Recuperación automática no requiere intervención manual
+// - Transparencia: usuario siempre conoce el estado del sistema
+// - Prevención de cascadas: evita que un problema cause múltiples fallos
+//
 void manejarEmergencia() {
   digitalWrite(RELE, LOW);
   estadoActual = EMERGENCIA;
@@ -396,6 +594,35 @@ void manejarEmergencia() {
   }
 }
 
+// ============================================
+// CONTROL DE RIEGO INTEGRADO
+// ============================================
+//
+// DESCRIPCIÓN EXHAUSTIVA:
+// -----------------------
+// Función principal que integra los cuatro principios de autonomía para
+// controlar el sistema de riego de manera inteligente y adaptativa.
+//
+// INTEGRACIÓN DE PRINCIPIOS:
+// 1. AUTO-CONFIGURACIÓN: Usa parámetros calibrados automáticamente
+// 2. AUTO-OPTIMIZACIÓN: Ajusta umbrales según temperatura y cultivo
+// 3. AUTO-CURACIÓN: Usa valores de respaldo si sensores fallan
+// 4. AUTO-PROTECCIÓN: Verifica condiciones seguras antes de regar
+//
+// AJUSTE DINÁMICO POR TEMPERATURA:
+// - Temperatura > 30°C: Factor 1.3x (mayor evaporación, más riego)
+// - Temperatura < 15°C: Factor 0.7x (menor evaporación, menos riego)
+// - Temperatura 15-30°C: Factor 1.0x (condiciones normales)
+//
+// CÁLCULO DE UMBRAL AJUSTADO:
+// umbralAjustado = umbralHumedadMin * factorTemperatura * factorCultivo
+//
+// IMPORTANCIA:
+// - Integra todos los principios de autonomía en una sola función
+// - Garantiza decisiones inteligentes basadas en múltiples factores
+// - Adapta el comportamiento a condiciones ambientales cambiantes
+// - Optimiza el uso de agua según necesidades reales
+//
 void controlarRiego(int humedadSuelo, float temperatura) {
   bool debeRegar = false;
   if (temperatura > 30) {
